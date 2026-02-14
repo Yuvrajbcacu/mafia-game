@@ -186,7 +186,11 @@ async function renderActions(phase){
     actionArea.innerHTML="";
     players.forEach(p=>{
       if(p.id===user.uid) return;
-      actionArea.innerHTML+=`<button class="playerBtn" onclick="selectTarget('${p.id}')">${p.name}</button>`;
+      const btn = document.createElement("button");
+btn.className = "playerBtn";
+btn.textContent = p.name;
+btn.onclick = () => selectTarget(p.id);
+actionArea.appendChild(btn);
     });
   }
 
@@ -197,25 +201,29 @@ async function renderActions(phase){
     actionArea.innerHTML="";
     players.forEach(p=>{
       if(p.id===user.uid) return;
-      actionArea.innerHTML+=`<button class="playerBtn" onclick="votePlayer('${p.id}')">${p.name}</button>`;
+      const btn = document.createElement("button");
+btn.className = "playerBtn";
+btn.textContent = p.name;
+btn.onclick = () => votePlayer(p.id);
+actionArea.appendChild(btn);
     });
   }
 }
 
 /* ===== ACTIONS ===== */
 
-window.selectTarget=async(uid)=>{
+async function selectTarget(uid){
   await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{
-    target:uid,actionSubmitted:true
+    target:uid,
+    actionSubmitted:true
   });
-  if(isHost) checkNightDone();
-};
+}
 
-window.votePlayer=async(uid)=>{
-  await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{vote:uid});
-  if(isHost) checkVotesDone();
-};
-
+async function votePlayer(uid){
+  await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{
+    vote:uid
+  });
+}
 /* ===== NIGHT ===== */
 
 async function checkNightDone(){

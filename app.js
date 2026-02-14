@@ -29,7 +29,7 @@ let heartbeatInterval=null;
 
 const ROLE_INFO={
   mafia:{team:"Mafia",text:"Choose someone to kill each night."},
-  doctor:{team:"Village",text:"Choose someone to save."},
+  doctor:{team:"Village",text:"Choose someone to save (including yourself)."},
   detective:{team:"Village",text:"Check if someone is mafia."},
   silencer:{team:"Mafia",text:"Mute one player from voting next day."},
   fool:{team:"Neutral",text:"Get voted out to win instantly."},
@@ -107,6 +107,14 @@ function renderRoleFromData(me){
     txt += `\n\n${me.detectiveResult}`;
   }
 
+  if(me.role==="mafia" && me.mafiaPartnerName){
+    txt += `\n\n🕶️ Silencer: ${me.mafiaPartnerName}`;
+  }
+
+  if(me.role==="silencer" && me.mafiaPartnerName){
+    txt += `\n\n🕶️ Mafia: ${me.mafiaPartnerName}`;
+  }
+
   roleText.innerText=txt;
 }
 
@@ -177,6 +185,7 @@ joinRoom.onclick=async()=>{
     actionSubmitted:false,
     silenced:false,
     detectiveResult:null,
+    mafiaPartnerName:null,
     connected:true,
     lastSeen:Date.now()
   });
@@ -255,15 +264,34 @@ async function assignRoles(){
   const roles=["mafia","doctor","detective","fool","silencer","villager","villager"];
   shuffle(roles);
 
+  let mafiaId=null;
+  let silencerId=null;
+
   for(let i=0;i<ids.length;i++){
+    if(roles[i]==="mafia") mafiaId=ids[i];
+    if(roles[i]==="silencer") silencerId=ids[i];
+  }
+
+  const allPlayersSnap=await getDocs(collection(db,"rooms",currentRoom,"players"));
+  const names={};
+  allPlayersSnap.forEach(p=>names[p.id]=p.data().name);
+
+  for(let i=0;i<ids.length;i++){
+    const role=roles[i];
+
+    let mafiaPartnerName=null;
+    if(role==="mafia" && silencerId) mafiaPartnerName=names[silencerId];
+    if(role==="silencer" && mafiaId) mafiaPartnerName=names[mafiaId];
+
     await updateDoc(doc(db,"rooms",currentRoom,"players",ids[i]),{
-      role:roles[i],
+      role,
       alive:true,
       silenced:false,
       vote:null,
       target:null,
       actionSubmitted:false,
-      detectiveResult:null
+      detectiveResult:null,
+      mafiaPartnerName
     });
   }
 
@@ -302,7 +330,7 @@ async function renderActions(phase){
     }
 
     players.forEach(p=>{
-      if(p.id===user.uid) return;
+      if(me.role!=="doctor" && p.id===user.uid) return; // doctor can save self
       const btn=document.createElement("button");
       btn.className="playerBtn";
       btn.textContent=p.name;
@@ -543,6 +571,7 @@ nextPhaseBtn.onclick=async()=>{
         actionSubmitted:false,
         silenced:false,
         detectiveResult:null,
+        mafiaPartnerName:null,
         connected:true,
         lastSeen:Date.now()
       });

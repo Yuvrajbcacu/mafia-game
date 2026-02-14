@@ -100,6 +100,30 @@ function listenRoom(){
     }
   });
 
+  /* ===== PASTE HERE ===== */
+
+  onSnapshot(
+    collection(db,"rooms",currentRoom,"players"),
+    (snap)=>{
+
+      let html = "<h3>Players</h3>";
+
+      snap.forEach(p=>{
+        const d = p.data();
+        const status = d.alive ? "🟢" : "💀";
+        html += `<div>${status} ${d.name}</div>`;
+      });
+
+      if(isHost){
+        document.getElementById("playerListHost").innerHTML = html;
+      } else {
+        document.getElementById("playerListPlayer").innerHTML = html;
+      }
+    }
+  );
+
+  /* ===== END PASTE ===== */
+
   if(!isHost){
     onSnapshot(doc(db,"rooms",currentRoom,"players",user.uid),snap=>{
       const me=snap.data();
@@ -111,6 +135,8 @@ function listenRoom(){
     });
   }
 }
+
+
 
 /* ===== ROLE ASSIGN ===== */
 

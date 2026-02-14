@@ -135,21 +135,6 @@ function listenRoom(){
       playerListPlayer.innerHTML=html;
     }
   });
-
-  if(!isHost){
-    onSnapshot(doc(db,"rooms",currentRoom,"players",user.uid),snap=>{
-      const me=snap.data();
-      if(!me?.role) return;
-
-      const info=ROLE_INFO[me.role];
-      roleText.innerText=
-        `Role: ${me.role}\nTeam: ${info.team}\n${info.text}`;
-
-      if(me.detectiveResult){
-        roleText.innerText += `\n\n${me.detectiveResult}`;
-      }
-    });
-  }
 }
 
 /* ===== ROLE ASSIGN ===== */
@@ -169,7 +154,11 @@ async function assignRoles(){
 
   for(let i=0;i<ids.length;i++){
     await updateDoc(doc(db,"rooms",currentRoom,"players",ids[i]),{
-      role:roles[i]
+      role:roles[i],
+      alive:true,
+      silenced:false,
+      vote:null,
+      target:null
     });
   }
 
@@ -207,7 +196,10 @@ async function renderActions(phase){
   }
 
   if(phase==="VOTING"){
-    if(me.silenced){ actionArea.innerHTML="🔇 You are silenced."; return; }
+    if(me.silenced){
+      actionArea.innerHTML="🔇 You are silenced and cannot vote.";
+      return;
+    }
 
     players.forEach(p=>{
       if(p.id===user.uid) return;
@@ -232,6 +224,10 @@ async function selectTarget(uid,name){
 }
 
 async function votePlayer(uid,name){
+
+  const me=(await getDoc(doc(db,"rooms",currentRoom,"players",user.uid))).data();
+  if(me.silenced) return;
+
   actionArea.innerHTML=`✅ You voted: <b>${name}</b>`;
   await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{
     vote:uid
@@ -270,12 +266,19 @@ async function resolveNight(){
   const mafia=players.find(p=>p.role==="mafia"&&p.alive);
   const doctor=players.find(p=>p.role==="doctor"&&p.alive);
   const detective=players.find(p=>p.role==="detective"&&p.alive);
+  const silencer=players.find(p=>p.role==="silencer"&&p.alive);
 
   let kill=mafia?.target||null;
   if(kill===doctor?.target) kill=null;
 
   if(kill){
     await updateDoc(doc(db,"rooms",currentRoom,"players",kill),{alive:false});
+  }
+
+  if(silencer?.target){
+    await updateDoc(doc(db,"rooms",currentRoom,"players",silencer.target),{
+      silenced:true
+    });
   }
 
   if(detective?.target){
@@ -320,6 +323,7 @@ async function checkVotesDone(){
 }
 
 async function resolveVoting(){
+
   resolvingVote=true;
 
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
@@ -339,23 +343,16 @@ async function resolveVoting(){
 
   if(top){
     await updateDoc(doc(db,"rooms",currentRoom,"players",top),{alive:false});
-
-const ended = await checkWin();
-if(ended){
-  resolvingVote = false;
-  return;
-}
-
-await updateDoc(doc(db,"rooms",currentRoom),{
-  phase:"VOTE_RESULT",
-  announcement:"🗳️ Voting finished."
-});
   }
 
-  await updateDoc(doc(db,"rooms",currentRoom),{
-    phase:"VOTE_RESULT",
-    announcement:"🗳️ Voting finished."
-  });
+  const ended=await checkWin();
+
+  if(!ended){
+    await updateDoc(doc(db,"rooms",currentRoom),{
+      phase:"VOTE_RESULT",
+      announcement:"🗳️ Voting finished."
+    });
+  }
 
   await resetVotes();
   resolvingVote=false;
@@ -366,6 +363,28 @@ await updateDoc(doc(db,"rooms",currentRoom),{
 nextPhaseBtn.onclick=async()=>{
   const roomRef=doc(db,"rooms",currentRoom);
   const room=(await getDoc(roomRef)).data();
+
+  if(room.phase==="GAME_END"){
+    const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
+    for(const p of snap.docs){
+      await updateDoc(p.ref,{
+        role:null,
+        alive:true,
+        vote:null,
+        target:null,
+        actionSubmitted:false,
+        silenced:false,
+        detectiveResult:null
+      });
+    }
+
+    await updateDoc(roomRef,{
+      phase:"LOBBY",
+      round:1,
+      announcement:"Waiting for players..."
+    });
+    return;
+  }
 
   if(room.phase==="LOBBY"){ assignRoles(); return; }
 
@@ -406,11 +425,9 @@ async function resetVotes(){
   }
 }
 
-
 async function checkWin(){
 
   const alive = await getAlivePlayers();
-
   const mafiaAlive = alive.some(p=>p.role==="mafia");
 
   if(!mafiaAlive){
@@ -425,7 +442,6 @@ async function checkWin(){
 
   return false;
 }
-
 
 async function clearSilence(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));

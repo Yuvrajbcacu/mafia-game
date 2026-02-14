@@ -1,21 +1,12 @@
 import { firebaseConfig } from "./firebase-config.js";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithPopup
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup }
+from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 import {
-  getFirestore,
-  doc,
-  setDoc,
-  getDoc,
-  updateDoc,
-  onSnapshot,
-  collection,
-  getDocs
+  getFirestore, doc, setDoc, getDoc,
+  updateDoc, onSnapshot, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 /* ===== INIT ===== */
@@ -65,7 +56,7 @@ guestLoginBtn.onclick=()=>{
   show("lobbyScreen");
 };
 
-/* ===== CREATE ROOM ===== */
+/* ===== ROOM ===== */
 
 createRoom.onclick=async()=>{
   const roomId=Math.random().toString(36).substring(2,7);
@@ -79,12 +70,9 @@ createRoom.onclick=async()=>{
 
   currentRoom=roomId;
   isHost=true;
-
   show("hostScreen");
   listenRoom();
 };
-
-/* ===== JOIN ===== */
 
 joinRoom.onclick=async()=>{
   currentRoom=roomIdInput.value.trim();
@@ -96,7 +84,8 @@ joinRoom.onclick=async()=>{
     vote:null,
     target:null,
     actionSubmitted:false,
-    silenced:false
+    silenced:false,
+    detectiveResult:null
   });
 
   show("playerScreen");
@@ -117,7 +106,6 @@ function listenRoom(){
     }else{
       phaseText.innerText=room.phase;
 
-      // ONLY rerender when phase changes
       if(room.phase!==lastPhase){
         lastPhase=room.phase;
         renderActions(room.phase);
@@ -126,20 +114,18 @@ function listenRoom(){
   });
 
   onSnapshot(collection(db,"rooms",currentRoom,"players"),snap=>{
+
     let html="<h3>Players</h3>";
 
     snap.forEach(p=>{
       const d=p.data();
-      html+=`<div>${d.alive?"🟢":"💀"} ${d.name}</div>`;
+      html += `<div>${d.alive?"🟢":"💀"} ${d.name}</div>`;
     });
 
     if(isHost){
       playerListHost.innerHTML=html;
-
-      // host auto-check progress
       checkNightDone();
       checkVotesDone();
-
     }else{
       playerListPlayer.innerHTML=html;
     }
@@ -153,6 +139,10 @@ function listenRoom(){
       const info=ROLE_INFO[me.role];
       roleText.innerText=
         `Role: ${me.role}\nTeam: ${info.team}\n${info.text}`;
+
+      if(me.detectiveResult){
+        roleText.innerText += `\n\n${me.detectiveResult}`;
+      }
     });
   }
 }
@@ -188,7 +178,7 @@ async function assignRoles(){
   });
 }
 
-/* ===== PLAYER ACTIONS ===== */
+/* ===== ACTION UI ===== */
 
 async function renderActions(phase){
 
@@ -197,34 +187,27 @@ async function renderActions(phase){
 
   actionArea.innerHTML="";
 
-  if(phase==="NIGHT"){
+  const players=await getAlivePlayers();
 
+  if(phase==="NIGHT"){
     if(["villager","fool"].includes(me.role)){
       actionArea.innerHTML="Waiting for night...";
       return;
     }
 
-    const players=await getAlivePlayers();
-
     players.forEach(p=>{
       if(p.id===user.uid) return;
 
       const btn=document.createElement("button");
       btn.className="playerBtn";
       btn.textContent=p.name;
-      btn.onclick=()=>selectTarget(p.id);
+      btn.onclick=()=>selectTarget(p.id,p.name);
       actionArea.appendChild(btn);
     });
   }
 
   if(phase==="VOTING"){
-
-    if(me.silenced){
-      actionArea.innerHTML="🔇 You are silenced.";
-      return;
-    }
-
-    const players=await getAlivePlayers();
+    if(me.silenced){ actionArea.innerHTML="🔇 You are silenced."; return; }
 
     players.forEach(p=>{
       if(p.id===user.uid) return;
@@ -232,7 +215,7 @@ async function renderActions(phase){
       const btn=document.createElement("button");
       btn.className="playerBtn";
       btn.textContent=p.name;
-      btn.onclick=()=>votePlayer(p.id);
+      btn.onclick=()=>votePlayer(p.id,p.name);
       actionArea.appendChild(btn);
     });
   }
@@ -240,18 +223,15 @@ async function renderActions(phase){
 
 /* ===== ACTIONS ===== */
 
-async function selectTarget(uid){
-  actionArea.innerHTML="✅ Action submitted";
-
+async function selectTarget(uid,name){
+  actionArea.innerHTML=`🌙 Selected: <b>${name}</b>`;
   await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{
-    target:uid,
-    actionSubmitted:true
+    target:uid,actionSubmitted:true
   });
 }
 
-async function votePlayer(uid){
-  actionArea.innerHTML="✅ Vote submitted";
-
+async function votePlayer(uid,name){
+  actionArea.innerHTML=`✅ You voted: <b>${name}</b>`;
   await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{
     vote:uid
   });
@@ -260,17 +240,15 @@ async function votePlayer(uid){
 /* ===== NIGHT ===== */
 
 async function checkNightDone(){
-
   const room=(await getDoc(doc(db,"rooms",currentRoom))).data();
-  if(!isHost || room?.phase!=="NIGHT") return;
+  if(!isHost || room.phase!=="NIGHT") return;
 
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
   let done=true;
 
   snap.forEach(p=>{
     const d=p.data();
-    if(!d.alive || !d.role) return;
-
+    if(!d.alive||!d.role) return;
     if(["mafia","doctor","detective","silencer"].includes(d.role)){
       if(!d.actionSubmitted) done=false;
     }
@@ -286,16 +264,23 @@ async function resolveNight(){
   const mafia=players.find(p=>p.role==="mafia");
   const doctor=players.find(p=>p.role==="doctor");
   const silencer=players.find(p=>p.role==="silencer");
+  const detective=players.find(p=>p.role==="detective");
 
   let kill=mafia?.target;
   if(kill===doctor?.target) kill=null;
 
-  if(kill){
-    await updateDoc(doc(db,"rooms",currentRoom,"players",kill),{alive:false});
-  }
+  if(kill) await updateDoc(doc(db,"rooms",currentRoom,"players",kill),{alive:false});
+  if(silencer?.target) await updateDoc(doc(db,"rooms",currentRoom,"players",silencer.target),{silenced:true});
 
-  if(silencer?.target){
-    await updateDoc(doc(db,"rooms",currentRoom,"players",silencer.target),{silenced:true});
+  if(detective?.target){
+    const checked=players.find(p=>p.id===detective.target);
+    if(checked){
+      await updateDoc(doc(db,"rooms",currentRoom,"players",detective.id),{
+        detectiveResult: checked.role==="mafia"
+          ? `🕵️ ${checked.name} is MAFIA`
+          : `🕵️ ${checked.name} is NOT mafia`
+      });
+    }
   }
 
   const dead=players.find(p=>p.id===kill)?.name||"Nobody";
@@ -306,27 +291,22 @@ async function resolveNight(){
   });
 
   resetActions();
-  checkWin();
 }
 
 /* ===== VOTING ===== */
 
 async function checkVotesDone(){
-
   const room=(await getDoc(doc(db,"rooms",currentRoom))).data();
-  if(!isHost || room?.phase!=="VOTING") return;
+  if(!isHost || room.phase!=="VOTING") return;
 
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
   const alive=[];
-
   snap.forEach(p=>{
     const d=p.data();
     if(d.alive && !d.silenced && d.role) alive.push(d);
   });
 
-  if(alive.length && alive.every(p=>p.vote)){
-    resolveVoting();
-  }
+  if(alive.length && alive.every(p=>p.vote)) resolveVoting();
 }
 
 async function resolveVoting(){
@@ -337,11 +317,10 @@ async function resolveVoting(){
   snap.forEach(p=>{
     const d=p.data();
     players.push({id:p.id,...d});
-    if(d.alive && d.vote) votes[d.vote]=(votes[d.vote]||0)+1;
+    if(d.alive&&d.vote) votes[d.vote]=(votes[d.vote]||0)+1;
   });
 
   let max=0,ties=[];
-
   for(const id in votes){
     if(votes[id]>max){ max=votes[id]; ties=[id]; }
     else if(votes[id]===max){ ties.push(id); }
@@ -359,42 +338,15 @@ async function resolveVoting(){
   const top=ties[0];
   await updateDoc(doc(db,"rooms",currentRoom,"players",top),{alive:false});
 
-  const eliminated=players.find(p=>p.id===top);
-
-  if(eliminated.role==="fool"){
-    endGame("🤡 Fool wins!");
-    return;
-  }
-
   await updateDoc(doc(db,"rooms",currentRoom),{
     phase:"VOTE_RESULT",
-    announcement:`🗳️ ${eliminated.name} was voted out.`
+    announcement:`🗳️ Player eliminated.`
   });
 
   resetVotes();
-  checkWin();
 }
 
-/* ===== WIN ===== */
-
-async function checkWin(){
-  const alive=await getAlivePlayers();
-
-  if(!alive.some(p=>p.role==="mafia"))
-    return endGame("🏆 Village wins!");
-
-  if(alive.length<=3)
-    return endGame("💀 Mafia wins!");
-}
-
-async function endGame(msg){
-  await updateDoc(doc(db,"rooms",currentRoom),{
-    phase:"GAME_END",
-    announcement:msg
-  });
-}
-
-/* ===== HOST ===== */
+/* ===== HOST BUTTON ===== */
 
 nextPhaseBtn.onclick=async()=>{
   const roomRef=doc(db,"rooms",currentRoom);
@@ -404,10 +356,7 @@ nextPhaseBtn.onclick=async()=>{
 
   if(room.phase==="DAY"){
     await resetVotes();
-    await updateDoc(roomRef,{
-      phase:"VOTING",
-      announcement:"🗳️ Voting started."
-    });
+    await updateDoc(roomRef,{phase:"VOTING",announcement:"🗳️ Voting started."});
   }
 
   if(room.phase==="VOTE_RESULT"){
@@ -424,30 +373,28 @@ nextPhaseBtn.onclick=async()=>{
 
 async function getAlivePlayers(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
-  const arr=[];
-  snap.forEach(p=>{ if(p.data().alive) arr.push({id:p.id,...p.data()}); });
+  const arr=[]; snap.forEach(p=>{ if(p.data().alive) arr.push({id:p.id,...p.data()}); });
   return arr;
 }
 
 async function resetActions(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
   for(const p of snap.docs){
-    await updateDoc(p.ref,{actionSubmitted:false,target:null});
+    await updateDoc(p.ref,{
+      actionSubmitted:false,
+      target:null
+    });
   }
 }
 
 async function resetVotes(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
-  for(const p of snap.docs){
-    await updateDoc(p.ref,{vote:null});
-  }
+  for(const p of snap.docs) await updateDoc(p.ref,{vote:null});
 }
 
 async function clearSilence(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
-  for(const p of snap.docs){
-    await updateDoc(p.ref,{silenced:false});
-  }
+  for(const p of snap.docs) await updateDoc(p.ref,{silenced:false});
 }
 
 function shuffle(arr){

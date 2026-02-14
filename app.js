@@ -31,7 +31,7 @@ const ROLE_INFO={
   mafia:{team:"Mafia",text:"Choose someone to kill each night."},
   doctor:{team:"Village",text:"Choose someone to save."},
   detective:{team:"Village",text:"Check if someone is mafia."},
-  silencer:{team:"Village",text:"Mute one player from voting next day."},
+  silencer:{team:"Mafia",text:"Mute one player from voting next day."},
   fool:{team:"Neutral",text:"Get voted out to win instantly."},
   villager:{team:"Village",text:"Discuss and vote."}
 };
@@ -315,6 +315,12 @@ async function renderActions(phase){
       btn.onclick=()=>votePlayer(p.id,p.name);
       actionArea.appendChild(btn);
     });
+
+    const skipBtn=document.createElement("button");
+    skipBtn.className="playerBtn";
+    skipBtn.textContent="⏭️ Skip Vote";
+    skipBtn.onclick=()=>votePlayer("SKIP","Skip");
+    actionArea.appendChild(skipBtn);
   }
 }
 
@@ -475,12 +481,16 @@ async function resolveVoting(){
   let votedOutName="Nobody";
   let votedOutRole=null;
 
-  if(top){
+  if(top && top!=="SKIP"){
     const target=players.find(p=>p.id===top);
     votedOutName=target?.name || "Unknown";
     votedOutRole=target?.role || null;
 
     await updateDoc(doc(db,"rooms",currentRoom,"players",top),{alive:false});
+  }
+
+  if(top==="SKIP"){
+    votedOutName="Nobody (Vote Skipped)";
   }
 
   if(votedOutRole==="fool"){

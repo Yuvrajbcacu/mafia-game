@@ -339,6 +339,17 @@ async function resolveVoting(){
 
   if(top){
     await updateDoc(doc(db,"rooms",currentRoom,"players",top),{alive:false});
+
+const ended = await checkWin();
+if(ended){
+  resolvingVote = false;
+  return;
+}
+
+await updateDoc(doc(db,"rooms",currentRoom),{
+  phase:"VOTE_RESULT",
+  announcement:"🗳️ Voting finished."
+});
   }
 
   await updateDoc(doc(db,"rooms",currentRoom),{
@@ -395,11 +406,39 @@ async function resetVotes(){
   }
 }
 
+
+async function checkWin(){
+
+  const alive = await getAlivePlayers();
+
+  const mafiaAlive = alive.some(p=>p.role==="mafia");
+
+  if(!mafiaAlive){
+    await endGame("🏆 Village wins! Mafia eliminated.");
+    return true;
+  }
+
+  if(alive.length<=3){
+    await endGame("💀 Mafia wins!");
+    return true;
+  }
+
+  return false;
+}
+
+
 async function clearSilence(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
   for(const p of snap.docs){
     await updateDoc(p.ref,{silenced:false});
   }
+}
+
+async function endGame(msg){
+  await updateDoc(doc(db,"rooms",currentRoom),{
+    phase:"GAME_END",
+    announcement:msg
+  });
 }
 
 function shuffle(arr){

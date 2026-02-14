@@ -286,8 +286,18 @@ async function renderActions(phase){
   const players=await getAlivePlayers();
 
   if(phase==="NIGHT"){
+
     if(["villager","fool"].includes(me.role)){
-      actionArea.innerHTML="Waiting for night...";
+      const readyBtn=document.createElement("button");
+      readyBtn.className="playerBtn";
+      readyBtn.textContent="✅ Ready";
+      readyBtn.onclick=async()=>{
+        actionArea.innerHTML="🌙 Waiting for night...";
+        await updateDoc(doc(db,"rooms",currentRoom,"players",user.uid),{
+          actionSubmitted:true
+        });
+      };
+      actionArea.appendChild(readyBtn);
       return;
     }
 
@@ -361,9 +371,7 @@ async function checkNightDone(){
     if(!d.alive||!d.role) return;
     if(!isPlayerActive(d)) return;
 
-    if(["mafia","doctor","detective","silencer"].includes(d.role)){
-      if(!d.actionSubmitted) done=false;
-    }
+    if(!d.actionSubmitted) done=false;
   });
 
   if(done) resolveNight();
@@ -473,24 +481,29 @@ async function resolveVoting(){
     }
   });
 
-  let max=0,top=null;
+  let max=0;
+  let top=null;
+  let ties=0;
+
   for(const id in votes){
-    if(votes[id]>max){ max=votes[id]; top=id; }
+    if(votes[id]>max){
+      max=votes[id];
+      top=id;
+      ties=1;
+    }else if(votes[id]===max){
+      ties++;
+    }
   }
 
-  let votedOutName="Nobody";
+  let votedOutName="Nobody (Vote Skipped)";
   let votedOutRole=null;
 
-  if(top && top!=="SKIP"){
+  if(top && top!=="SKIP" && ties===1){
     const target=players.find(p=>p.id===top);
     votedOutName=target?.name || "Unknown";
     votedOutRole=target?.role || null;
 
     await updateDoc(doc(db,"rooms",currentRoom,"players",top),{alive:false});
-  }
-
-  if(top==="SKIP"){
-    votedOutName="Nobody (Vote Skipped)";
   }
 
   if(votedOutRole==="fool"){

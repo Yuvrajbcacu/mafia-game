@@ -1,0 +1,37 @@
+body{
+  margin:0;
+  font-family:sans-serif;
+  background:#0f0f0f;
+  color:white;
+  display:flex;
+  justify-content:center;
+}
+#app{
+  width:100%;
+  max-width:420px;
+  padding:20px;
+}
+.screen{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.hidden{display:none;}
+
+button{
+  padding:14px;
+  border:none;
+  border-radius:12px;
+  background:#ff3b5c;
+  color:white;
+  font-size:16px;
+}
+input{
+  padding:12px;
+  border-radius:10px;
+  border:none;
+}
+.playerBtn{
+  background:#222;
+  border:1px solid #444;
+}

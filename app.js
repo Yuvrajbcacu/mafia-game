@@ -6,7 +6,7 @@ from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 import {
   getFirestore, doc, setDoc, getDoc,
-  updateDoc, onSnapshot, collection, getDocs
+  updateDoc, onSnapshot, collection, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 /* ===== INIT ===== */
@@ -20,6 +20,10 @@ let lastPhase=null;
 
 let resolvingNight=false;
 let resolvingVote=false;
+
+let roomListenerUnsub=null;
+let playersListenerUnsub=null;
+let heartbeatInterval=null;
 
 /* ===== ROLES ===== */
 
@@ -37,6 +41,88 @@ const ROLE_INFO={
 function show(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.add("hidden"));
   document.getElementById(id).classList.remove("hidden");
+}
+
+/* ===== ACTIVE / HEARTBEAT ===== */
+
+const HEARTBEAT_MS = 5000;
+const ACTIVE_TIMEOUT_MS = 15000;
+
+async function markActive(){
+  if(!currentRoom || !user) return;
+  try{
+    await updateDoc(
+      doc(db,"rooms",currentRoom,"players",user.uid),
+      { lastSeen: Date.now(), connected:true }
+    );
+  }catch(e){}
+}
+
+function startHeartbeat(){
+  stopHeartbeat();
+  markActive();
+  heartbeatInterval=setInterval(markActive,HEARTBEAT_MS);
+}
+
+function stopHeartbeat(){
+  if(heartbeatInterval){
+    clearInterval(heartbeatInterval);
+    heartbeatInterval=null;
+  }
+}
+
+function isPlayerActive(p){
+  if(!p) return false;
+  if(!p.connected) return false;
+  if(!p.lastSeen) return false;
+  return (Date.now()-p.lastSeen) <= ACTIVE_TIMEOUT_MS;
+}
+
+window.addEventListener("beforeunload", async ()=>{
+  try{
+    if(currentRoom && user){
+      await updateDoc(
+        doc(db,"rooms",currentRoom,"players",user.uid),
+        { connected:false, lastSeen:Date.now() }
+      );
+    }
+  }catch(e){}
+});
+
+/* ===== ROLE RENDER (STABLE) ===== */
+
+let cachedMeData = null;
+
+function renderRoleFromData(me){
+  if(isHost) return;
+  if(!me || !me.role){
+    roleText.innerText="Role assigning...";
+    return;
+  }
+
+  const info=ROLE_INFO[me.role];
+  let txt=`Role: ${me.role}\nTeam: ${info.team}\n${info.text}`;
+  if(me.detectiveResult){
+    txt += `\n\n${me.detectiveResult}`;
+  }
+  roleText.innerText=txt;
+}
+
+async function renderRoleInfo(){
+  if(isHost) return;
+
+  if(cachedMeData){
+    renderRoleFromData(cachedMeData);
+    return;
+  }
+
+  const snap = await getDoc(
+    doc(db,"rooms",currentRoom,"players",user.uid)
+  );
+
+  const me = snap.data();
+  cachedMeData = me || null;
+  renderRoleFromData(me);
 }
 
 /* ===== LOGIN ===== */
@@ -88,19 +174,25 @@ joinRoom.onclick=async()=>{
     target:null,
     actionSubmitted:false,
     silenced:false,
-    detectiveResult:null
+    detectiveResult:null,
+    connected:true,
+    lastSeen:Date.now()
   });
 
   show("playerScreen");
   myName.innerText="You: "+user.displayName;
   listenRoom();
+  startHeartbeat();
 };
 
 /* ===== LISTEN ===== */
 
 function listenRoom(){
 
-  onSnapshot(doc(db,"rooms",currentRoom),snap=>{
+  if(roomListenerUnsub) roomListenerUnsub();
+  if(playersListenerUnsub) playersListenerUnsub();
+
+  roomListenerUnsub = onSnapshot(doc(db,"rooms",currentRoom),snap=>{
     const room=snap.data();
     if(!room) return;
 
@@ -112,19 +204,28 @@ function listenRoom(){
 
       if(room.phase!==lastPhase){
         lastPhase=room.phase;
+        renderRoleInfo();
         renderActions(room.phase);
+      }else{
+        renderRoleInfo();
       }
     }
   });
 
-  onSnapshot(collection(db,"rooms",currentRoom,"players"),snap=>{
+  playersListenerUnsub = onSnapshot(collection(db,"rooms",currentRoom,"players"),snap=>{
 
     let html="<h3>Players</h3>";
 
     snap.forEach(p=>{
       const d=p.data();
       const meTag=(p.id===user.uid)?" (You)":"";
-      html+=`<div>${d.alive?"🟢":"💀"} ${d.name}${meTag}</div>`;
+      const active=isPlayerActive(d);
+      html+=`<div>${d.alive?"🟢":"💀"} ${d.name}${meTag}${active?"":" (dc)"}</div>`;
+
+      if(p.id===user.uid){
+        cachedMeData=d;
+        renderRoleFromData(d);
+      }
     });
 
     if(isHost){
@@ -158,7 +259,9 @@ async function assignRoles(){
       alive:true,
       silenced:false,
       vote:null,
-      target:null
+      target:null,
+      actionSubmitted:false,
+      detectiveResult:null
     });
   }
 
@@ -171,6 +274,8 @@ async function assignRoles(){
 /* ===== ACTION UI ===== */
 
 async function renderActions(phase){
+
+  await renderRoleInfo();
 
   const me=(await getDoc(doc(db,"rooms",currentRoom,"players",user.uid))).data();
   if(!me?.alive){ actionArea.innerHTML="💀 You are dead."; return; }
@@ -186,7 +291,6 @@ async function renderActions(phase){
 
     players.forEach(p=>{
       if(p.id===user.uid) return;
-
       const btn=document.createElement("button");
       btn.className="playerBtn";
       btn.textContent=p.name;
@@ -203,7 +307,6 @@ async function renderActions(phase){
 
     players.forEach(p=>{
       if(p.id===user.uid) return;
-
       const btn=document.createElement("button");
       btn.className="playerBtn";
       btn.textContent=p.name;
@@ -248,6 +351,8 @@ async function checkNightDone(){
   snap.forEach(p=>{
     const d=p.data();
     if(!d.alive||!d.role) return;
+    if(!isPlayerActive(d)) return;
+
     if(["mafia","doctor","detective","silencer"].includes(d.role)){
       if(!d.actionSubmitted) done=false;
     }
@@ -258,15 +363,22 @@ async function checkNightDone(){
 
 async function resolveNight(){
 
+  if(resolvingNight) return;
   resolvingNight=true;
+
+  const room=(await getDoc(doc(db,"rooms",currentRoom))).data();
+  if(!isHost || room.phase!=="NIGHT"){
+    resolvingNight=false;
+    return;
+  }
 
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
   const players=[]; snap.forEach(p=>players.push({id:p.id,...p.data()}));
 
-  const mafia=players.find(p=>p.role==="mafia"&&p.alive);
-  const doctor=players.find(p=>p.role==="doctor"&&p.alive);
-  const detective=players.find(p=>p.role==="detective"&&p.alive);
-  const silencer=players.find(p=>p.role==="silencer"&&p.alive);
+  const mafia=players.find(p=>p.role==="mafia"&&p.alive&&isPlayerActive(p));
+  const doctor=players.find(p=>p.role==="doctor"&&p.alive&&isPlayerActive(p));
+  const detective=players.find(p=>p.role==="detective"&&p.alive&&isPlayerActive(p));
+  const silencer=players.find(p=>p.role==="silencer"&&p.alive&&isPlayerActive(p));
 
   let kill=mafia?.target||null;
   if(kill===doctor?.target) kill=null;
@@ -300,6 +412,13 @@ async function resolveNight(){
   });
 
   await resetActions();
+
+  const ended=await checkWin();
+  if(ended){
+    resolvingNight=false;
+    return;
+  }
+
   resolvingNight=false;
 }
 
@@ -316,7 +435,7 @@ async function checkVotesDone(){
 
   snap.forEach(p=>{
     const d=p.data();
-    if(d.alive && !d.silenced && d.role) alive.push(d);
+    if(d.alive && !d.silenced && d.role && isPlayerActive(d)) alive.push(d);
   });
 
   if(alive.length && alive.every(p=>p.vote)) resolveVoting();
@@ -324,14 +443,21 @@ async function checkVotesDone(){
 
 async function resolveVoting(){
 
+  if(resolvingVote) return;
   resolvingVote=true;
+
+  const room=(await getDoc(doc(db,"rooms",currentRoom))).data();
+  if(!isHost || room.phase!=="VOTING"){
+    resolvingVote=false;
+    return;
+  }
 
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
   const votes={};
 
   snap.forEach(p=>{
     const d=p.data();
-    if(d.alive&&d.vote){
+    if(d.alive && d.vote && !d.silenced && isPlayerActive(d)){
       votes[d.vote]=(votes[d.vote]||0)+1;
     }
   });
@@ -374,7 +500,9 @@ nextPhaseBtn.onclick=async()=>{
         target:null,
         actionSubmitted:false,
         silenced:false,
-        detectiveResult:null
+        detectiveResult:null,
+        connected:true,
+        lastSeen:Date.now()
       });
     }
 
@@ -394,12 +522,12 @@ nextPhaseBtn.onclick=async()=>{
   }
 
   if(room.phase==="VOTE_RESULT"){
+    await clearSilence();
     await updateDoc(roomRef,{
       phase:"NIGHT",
       round:room.round+1,
       announcement:"🌙 New night begins."
     });
-    clearSilence();
   }
 };
 
@@ -407,7 +535,10 @@ nextPhaseBtn.onclick=async()=>{
 
 async function getAlivePlayers(){
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
-  const arr=[]; snap.forEach(p=>{ if(p.data().alive) arr.push({id:p.id,...p.data()}); });
+  const arr=[]; 
+  snap.forEach(p=>{
+    if(p.data().alive) arr.push({id:p.id,...p.data()});
+  });
   return arr;
 }
 

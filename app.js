@@ -6,7 +6,7 @@ from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 import {
   getFirestore, doc, setDoc, getDoc,
-  updateDoc, onSnapshot, collection, getDocs, serverTimestamp
+  updateDoc, onSnapshot, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 /* ===== INIT ===== */
@@ -102,9 +102,11 @@ function renderRoleFromData(me){
 
   const info=ROLE_INFO[me.role];
   let txt=`Role: ${me.role}\nTeam: ${info.team}\n${info.text}`;
+
   if(me.detectiveResult){
     txt += `\n\n${me.detectiveResult}`;
   }
+
   roleText.innerText=txt;
 }
 
@@ -453,10 +455,13 @@ async function resolveVoting(){
   }
 
   const snap=await getDocs(collection(db,"rooms",currentRoom,"players"));
+  const players=[];
   const votes={};
 
   snap.forEach(p=>{
-    const d=p.data();
+    const d={id:p.id,...p.data()};
+    players.push(d);
+
     if(d.alive && d.vote && !d.silenced && isPlayerActive(d)){
       votes[d.vote]=(votes[d.vote]||0)+1;
     }
@@ -467,8 +472,22 @@ async function resolveVoting(){
     if(votes[id]>max){ max=votes[id]; top=id; }
   }
 
+  let votedOutName="Nobody";
+  let votedOutRole=null;
+
   if(top){
+    const target=players.find(p=>p.id===top);
+    votedOutName=target?.name || "Unknown";
+    votedOutRole=target?.role || null;
+
     await updateDoc(doc(db,"rooms",currentRoom,"players",top),{alive:false});
+  }
+
+  if(votedOutRole==="fool"){
+    await endGame(`🤡 ${votedOutName} (Fool) got voted out and wins instantly!`);
+    await resetVotes();
+    resolvingVote=false;
+    return;
   }
 
   const ended=await checkWin();
@@ -476,7 +495,7 @@ async function resolveVoting(){
   if(!ended){
     await updateDoc(doc(db,"rooms",currentRoom),{
       phase:"VOTE_RESULT",
-      announcement:"🗳️ Voting finished."
+      announcement:`🗳️ Voting finished. ${votedOutName} was voted out.`
     });
   }
 

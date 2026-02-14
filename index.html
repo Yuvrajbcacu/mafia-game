@@ -10,34 +10,45 @@
 
 <div id="app">
 
+  <!-- LOGIN -->
   <div id="loginScreen" class="screen">
     <h1>🕵️ Mafia</h1>
+
+    <input id="guestName" placeholder="Enter name">
+    <button id="guestLoginBtn">Play as Guest</button>
+
     <button id="loginBtn">Login with Google</button>
   </div>
 
+  <!-- LOBBY -->
   <div id="lobbyScreen" class="screen hidden">
     <input id="roomIdInput" placeholder="Room Code">
     <button id="createRoom">Create Room (Host)</button>
     <button id="joinRoom">Join Room</button>
   </div>
 
+  <!-- PLAYER -->
   <div id="playerScreen" class="screen hidden">
-  <h2 id="phaseText"></h2>
-  <p id="roleText"></p>
+    <h2 id="phaseText"></h2>
+    <p id="roleText"></p>
 
-  <div id="playerListPlayer"></div>
+    <div id="playerListPlayer"></div>
+    <div id="actionArea"></div>
+  </div>
 
-  <div id="actionArea"></div>
-</div>
+  <!-- HOST -->
+  <div id="hostScreen" class="screen hidden">
+    <h2>Host Panel</h2>
 
- <div id="hostScreen" class="screen hidden">
-  <h2>Host Panel</h2>
-  <p id="hostAnnouncement"></p>
+    <!-- Room code ALWAYS visible -->
+    <h3 id="hostRoomCode"></h3>
 
-  <div id="playerListHost"></div>
+    <p id="hostAnnouncement"></p>
 
-  <button id="nextPhaseBtn">NEXT</button>
-</div>
+    <div id="playerListHost"></div>
+
+    <button id="nextPhaseBtn">NEXT</button>
+  </div>
 
 </div>
 
